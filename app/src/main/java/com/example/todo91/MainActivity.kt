@@ -10,7 +10,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
-import com.example.todo91.ui.home.HomeScreen
+import com.example.todo91.home.HomeScreen
 import com.example.todo91.ui.theme.ToDo91Theme
 
 class MainActivity : ComponentActivity() {
