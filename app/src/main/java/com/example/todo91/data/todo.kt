@@ -11,8 +11,8 @@ data class Todo(
 
     val task: String,
     var isCompleted: Boolean,
-    val colorHex: String
+    val colorIndex: Int
 ) {
-    constructor(task: String, isCompleted: Boolean = false, colorHex: String) :
-            this(UUID.randomUUID(), task, isCompleted, colorHex)
+    constructor(task: String, isCompleted: Boolean = false, colorIndex: Int) :
+            this(UUID.randomUUID(), task, isCompleted, colorIndex)
 }
