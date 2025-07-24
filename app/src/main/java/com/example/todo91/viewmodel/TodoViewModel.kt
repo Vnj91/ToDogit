@@ -10,6 +10,8 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.WriteBatch
+import com.google.firebase.firestore.ktx.snapshots
+import com.google.firebase.firestore.ktx.toObjects
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -19,7 +21,6 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
 
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
-    private val _currentUserId = MutableStateFlow<String?>(null)
     private val _currentSortOrder = MutableStateFlow(SortOrder.NEWEST_FIRST)
     val currentSortOrder: StateFlow<SortOrder> = _currentSortOrder.asStateFlow()
     private val _isLoading = MutableStateFlow(true)
@@ -27,57 +28,49 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
     private val _errorLoadingTasks = MutableStateFlow<String?>(null)
     val errorLoadingTasks: StateFlow<String?> = _errorLoadingTasks.asStateFlow()
 
+    private val userIdFlow = MutableStateFlow(auth.currentUser?.uid)
+
     init {
         auth.addAuthStateListener { firebaseAuth ->
-            _currentUserId.value = firebaseAuth.currentUser?.uid
+            userIdFlow.value = firebaseAuth.currentUser?.uid
         }
     }
 
-    val todos: Flow<List<Todo>> = createTodoFlow(isArchived = false)
-    val archivedTodos: Flow<List<Todo>> = createTodoFlow(isArchived = true)
-
-    private fun createTodoFlow(isArchived: Boolean): Flow<List<Todo>> {
-        return combine(_currentUserId, _currentSortOrder) { userId, sortOrder ->
-            userId to sortOrder
-        }.flatMapLatest { (userId, sortOrder) ->
-            if (userId == null) {
-                _isLoading.value = false
-                return@flatMapLatest flowOf(emptyList())
-            }
-            val tasksCollection = firestore.collection("users").document(userId).collection("tasks")
-            var query: Query = tasksCollection.whereEqualTo("isArchived", isArchived)
-
-            if (!isArchived) {
-                query = query.orderBy("isPinned", Query.Direction.DESCENDING)
-            }
-
-            query = when (sortOrder) {
-                SortOrder.CUSTOM -> query.orderBy("lastEdited", Query.Direction.DESCENDING) // Fallback for now
-                SortOrder.NEWEST_FIRST -> query.orderBy("lastEdited", Query.Direction.DESCENDING)
-                SortOrder.OLDEST_FIRST -> query.orderBy("lastEdited", Query.Direction.ASCENDING)
-                SortOrder.ALPHABETICAL_ASC -> query.orderBy("title", Query.Direction.ASCENDING)
-                SortOrder.ALPHABETICAL_DESC -> query.orderBy("title", Query.Direction.DESCENDING)
-                SortOrder.COMPLETED_FIRST -> query.orderBy("isCompleted", Query.Direction.DESCENDING)
-                SortOrder.INCOMPLETE_FIRST -> query.orderBy("isCompleted", Query.Direction.ASCENDING)
-            }
-
-            callbackFlow {
-                _isLoading.value = true
-                val registration = query.addSnapshotListener { snapshot, e ->
-                    if (e != null) {
-                        _errorLoadingTasks.value = "Firestore query failed. Check logs for index link."
-                        close(e)
-                        return@addSnapshotListener
-                    }
-                    if (snapshot != null) {
-                        trySend(snapshot.toObjects(Todo::class.java)).isSuccess
-                        _errorLoadingTasks.value = null
-                    }
-                    _isLoading.value = false
-                }
-                awaitClose { registration.remove() }
-            }
+    private val userTodosFlow: Flow<List<Todo>> = userIdFlow.flatMapLatest { userId ->
+        if (userId == null) {
+            flowOf(emptyList())
+        } else {
+            firestore.collection("users").document(userId).collection("tasks")
+                .snapshots()
+                .map { snapshot -> snapshot.toObjects<Todo>() }
         }
+    }.distinctUntilChanged()
+
+
+    val todos: Flow<List<Todo>> = combine(userTodosFlow, _currentSortOrder) { allTodos, sortOrder ->
+        val unarchived = allTodos.filter { !it.isArchived }
+        sort(unarchived, sortOrder)
+    }
+
+    val archivedTodos: Flow<List<Todo>> = combine(userTodosFlow, _currentSortOrder) { allTodos, sortOrder ->
+        val archived = allTodos.filter { it.isArchived }
+        sort(archived, sortOrder)
+    }
+
+    private fun sort(notes: List<Todo>, sortOrder: SortOrder): List<Todo> {
+        val pinned = notes.filter { it.isPinned }
+        val unpinned = notes.filter { !it.isPinned }
+
+        val sortedUnpinned = when(sortOrder) {
+            SortOrder.NEWEST_FIRST -> unpinned.sortedByDescending { it.lastEdited }
+            SortOrder.OLDEST_FIRST -> unpinned.sortedBy { it.lastEdited }
+            SortOrder.ALPHABETICAL_ASC -> unpinned.sortedBy { it.title }
+            SortOrder.ALPHABETICAL_DESC -> unpinned.sortedByDescending { it.title }
+            SortOrder.COMPLETED_FIRST -> unpinned.sortedByDescending { it.isCompleted }
+            SortOrder.INCOMPLETE_FIRST -> unpinned.sortedBy { it.isCompleted }
+            SortOrder.CUSTOM -> unpinned // This case was missing
+        }
+        return pinned + sortedUnpinned
     }
 
     fun getTodoById(todoId: String): Flow<Todo?> {
@@ -98,7 +91,13 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
         val userId = auth.currentUser?.uid ?: return
         viewModelScope.launch {
             try {
-                val newTodo = Todo(title = title, task = task, isCompleted = false, colorIndex = colorIndex)
+                val newTodo = Todo(
+                    title = title,
+                    task = task,
+                    isCompleted = false,
+                    isArchived = false,
+                    colorIndex = colorIndex
+                )
                 firestore.collection("users").document(userId).collection("tasks").add(newTodo).await()
             } catch (e: Exception) {
                 _errorLoadingTasks.value = "Failed to add task: ${e.message}"
