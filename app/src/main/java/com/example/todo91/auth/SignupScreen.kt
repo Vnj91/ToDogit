@@ -1,36 +1,13 @@
 package com.example.todo91.auth
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.todo91.ui.theme.ToDo91Theme
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -46,6 +23,7 @@ fun SignupScreen(
     val authError by authViewModel.authError.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val isLoading by authViewModel.isLoading.collectAsState()
 
     LaunchedEffect(authError) {
         authError?.let {
@@ -64,9 +42,7 @@ fun SignupScreen(
     }
 
     Scaffold(
-        topBar = {
-            TopAppBar(title = { Text("Sign Up") })
-        },
+        topBar = { TopAppBar(title = { Text("Sign Up") }) },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
         Column(
@@ -81,7 +57,8 @@ fun SignupScreen(
                 value = email,
                 onValueChange = { email = it },
                 label = { Text("Email") },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isLoading
             )
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
@@ -89,7 +66,8 @@ fun SignupScreen(
                 onValueChange = { password = it },
                 label = { Text("Password") },
                 visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isLoading
             )
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
@@ -97,11 +75,16 @@ fun SignupScreen(
                 onValueChange = { confirmPassword = it },
                 label = { Text("Confirm Password") },
                 visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isLoading
             )
             Spacer(Modifier.height(16.dp))
             Button(
                 onClick = {
+                    if (password.length < 6) {
+                        scope.launch { snackbarHostState.showSnackbar("Password must be at least 6 characters") }
+                        return@Button
+                    }
                     if (password == confirmPassword) {
                         authViewModel.signUpWithEmail(email, password)
                     } else {
@@ -110,22 +93,19 @@ fun SignupScreen(
                         }
                     }
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isLoading
             ) {
-                Text("Sign Up with Email")
+                if (isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+                } else {
+                    Text("Sign Up with Email")
+                }
             }
             Spacer(Modifier.height(8.dp))
-            TextButton(onClick = onNavigateToLogin) {
+            TextButton(onClick = onNavigateToLogin, enabled = !isLoading) {
                 Text("Already have an account? Login")
             }
         }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun PreviewSignupScreen() {
-    ToDo91Theme {
-        SignupScreen(onNavigateToLogin = {}, onSignUpSuccess = {})
     }
 }

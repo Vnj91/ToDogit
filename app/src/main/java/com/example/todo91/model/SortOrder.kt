@@ -1,7 +1,7 @@
-
-package com.example.todo91.data
+package com.example.todo91.model
 
 enum class SortOrder {
+    CUSTOM,
     NEWEST_FIRST,
     OLDEST_FIRST,
     ALPHABETICAL_ASC,

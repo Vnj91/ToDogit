@@ -1,35 +1,16 @@
 package com.example.todo91.auth
 
 import android.app.Activity
-import android.content.Context
-import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -39,9 +20,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.todo91.ui.theme.ToDo91Theme
 import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.common.api.ApiException
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.PhoneAuthProvider
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,10 +34,14 @@ fun LoginScreen(
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var phoneNumber by remember { mutableStateOf("") }
+    var verificationCode by remember { mutableStateOf("") }
     val authError by authViewModel.authError.collectAsState()
+    val verificationId by authViewModel.verificationId.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
+    val activity = LocalContext.current as Activity
+    val isLoading by authViewModel.isLoading.collectAsState()
 
     LaunchedEffect(authError) {
         authError?.let {
@@ -98,9 +83,7 @@ fun LoginScreen(
     }
 
     Scaffold(
-        topBar = {
-            TopAppBar(title = { Text("Login") })
-        },
+        topBar = { TopAppBar(title = { Text("Login") }) },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
         Column(
@@ -115,7 +98,8 @@ fun LoginScreen(
                 value = email,
                 onValueChange = { email = it },
                 label = { Text("Email") },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isLoading
             )
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
@@ -123,17 +107,23 @@ fun LoginScreen(
                 onValueChange = { password = it },
                 label = { Text("Password") },
                 visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isLoading
             )
             Spacer(Modifier.height(16.dp))
             Button(
                 onClick = { authViewModel.signInWithEmail(email, password) },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isLoading
             ) {
-                Text("Login with Email")
+                if (isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+                } else {
+                    Text("Login with Email")
+                }
             }
             Spacer(Modifier.height(8.dp))
-            TextButton(onClick = onNavigateToSignUp) {
+            TextButton(onClick = onNavigateToSignUp, enabled = !isLoading) {
                 Text("Don't have an account? Sign Up")
             }
             Spacer(Modifier.height(16.dp))
@@ -142,19 +132,90 @@ fun LoginScreen(
                     val signInIntent = authViewModel.getGoogleSignInClient().signInIntent
                     googleSignInLauncher.launch(signInIntent)
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isLoading
             ) {
-                Text("Sign In with Google")
+                if (isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+                } else {
+                    Text("Sign In with Google")
+                }
             }
-            // TODO: Add Phone Sign-In UI here later
-        }
-    }
-}
+            Spacer(Modifier.height(24.dp))
+            Text(
+                text = "OR",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+            Spacer(Modifier.height(16.dp))
 
-@Preview(showBackground = true)
-@Composable
-fun PreviewLoginScreen() {
-    ToDo91Theme {
-        LoginScreen(onNavigateToSignUp = {}, onSignInSuccess = {})
+            AnimatedVisibility(
+                visible = verificationId == null,
+                enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
+                exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 })
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = phoneNumber,
+                        onValueChange = { phoneNumber = it },
+                        label = { Text("Phone Number (e.g., +919876543210)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isLoading
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            if (phoneNumber.isNotBlank()) {
+                                authViewModel.startPhoneNumberVerification(activity, phoneNumber)
+                            } else {
+                                scope.launch { snackbarHostState.showSnackbar("Phone number cannot be empty") }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isLoading
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+                        } else {
+                            Text("Send Verification Code")
+                        }
+                    }
+                }
+            }
+
+            AnimatedVisibility(
+                visible = verificationId != null,
+                enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
+                exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 })
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = verificationCode,
+                        onValueChange = { verificationCode = it },
+                        label = { Text("Verification Code") },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isLoading
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            verificationId?.let { id ->
+                                val credential = PhoneAuthProvider.getCredential(id, verificationCode)
+                                authViewModel.signInWithPhoneAuthCredential(credential)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isLoading && verificationCode.isNotBlank()
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+                        } else {
+                            Text("Sign In with Code")
+                        }
+                    }
+                }
+            }
+        }
     }
 }
