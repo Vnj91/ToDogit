@@ -10,6 +10,6 @@ import androidx.compose.ui.Modifier
 @Composable
 fun RemindersScreen() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("Reminders Screen - Coming Soon!")
+        Text("Reminders Screen functionality has been integrated into the Home Screen.")
     }
 }

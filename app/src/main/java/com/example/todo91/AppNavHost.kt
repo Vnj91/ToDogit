@@ -10,7 +10,6 @@ import androidx.navigation.navArgument
 import com.example.todo91.archive.ArchiveScreen
 import com.example.todo91.home.HomeScreen
 import com.example.todo91.navigation.Screen
-import com.example.todo91.reminders.RemindersScreen
 import com.example.todo91.taskdetail.TaskDetailScreen
 import kotlinx.coroutines.CoroutineScope
 
@@ -38,9 +37,6 @@ fun AppNavHost(
                     navController.navigate(Screen.TaskDetail.createRoute(todoId))
                 }
             )
-        }
-        composable(Screen.Reminders.route) {
-            RemindersScreen()
         }
         composable(
             route = Screen.TaskDetail.route,

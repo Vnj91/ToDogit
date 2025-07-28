@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.todo91.common.*
@@ -19,11 +20,7 @@ import com.example.todo91.viewmodel.TodoViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
-enum class FilterOrder {
-    ALL, COMPLETED, INCOMPLETE
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     drawerState: DrawerState,
@@ -48,16 +45,7 @@ fun HomeScreen(
     var showFilterMenu by remember { mutableStateOf(false) }
 
     val filteredTodos = remember(todos, searchQuery, currentFilterOrder) {
-        val searchFiltered = if (searchQuery.isBlank()) {
-            todos
-        } else {
-            todos.filter { it.task.contains(searchQuery, ignoreCase = true) || it.title.contains(searchQuery, ignoreCase = true) }
-        }
-        when (currentFilterOrder) {
-            FilterOrder.COMPLETED -> searchFiltered.filter { it.isCompleted }
-            FilterOrder.INCOMPLETE -> searchFiltered.filter { !it.isCompleted }
-            FilterOrder.ALL -> searchFiltered
-        }
+        filterNotes(todos, searchQuery, currentFilterOrder)
     }
 
     Scaffold(
@@ -119,13 +107,12 @@ fun HomeScreen(
             .fillMaxSize()
             .padding(paddingValues)) {
             when {
-                isLoading && todos.isEmpty() -> LoadingScreen()
+                isLoading -> LoadingScreen()
                 errorLoadingTasks != null -> ErrorScreen(message = errorLoadingTasks!!)
                 filteredTodos.isEmpty() -> EmptyScreen(searchQuery = searchQuery, currentFilterOrder = currentFilterOrder)
                 else -> NoteGrid(
                     todos = filteredTodos,
                     selectedIds = selectedIds,
-                    isInSelectionMode = isInSelectionMode,
                     onNoteClick = { todo ->
                         if (isInSelectionMode) {
                             if (todo.id in selectedIds) {
@@ -161,17 +148,37 @@ fun HomeScreen(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class) // ADDED
+private fun filterNotes(notes: List<Todo>, searchQuery: String, filterOrder: FilterOrder): List<Todo> {
+    val searchFiltered = if (searchQuery.isBlank()) {
+        notes
+    } else {
+        notes.filter { it.task.contains(searchQuery, ignoreCase = true) || it.title.contains(searchQuery, ignoreCase = true) }
+    }
+    return when (filterOrder) {
+        FilterOrder.COMPLETED -> searchFiltered.filter { it.isCompleted }
+        FilterOrder.INCOMPLETE -> searchFiltered.filter { !it.isCompleted }
+        FilterOrder.ALL -> searchFiltered
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun NoteGrid(
     todos: List<Todo>,
     selectedIds: Set<String>,
-    isInSelectionMode: Boolean,
     onNoteClick: (Todo) -> Unit,
     onNoteLongClick: (Todo) -> Unit
 ) {
+    val configuration = LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp.dp
+    val columnCount = when {
+        screenWidth > 840.dp -> 4
+        screenWidth > 600.dp -> 3
+        else -> 2
+    }
+
     LazyVerticalStaggeredGrid(
-        columns = StaggeredGridCells.Fixed(2),
+        columns = StaggeredGridCells.Fixed(columnCount),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),

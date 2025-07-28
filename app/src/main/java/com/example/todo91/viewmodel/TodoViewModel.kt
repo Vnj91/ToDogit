@@ -8,15 +8,15 @@ import com.example.todo91.model.Todo
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.WriteBatch
 import com.google.firebase.firestore.ktx.snapshots
 import com.google.firebase.firestore.ktx.toObjects
-import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class TodoViewModel(application: Application) : AndroidViewModel(application) {
 
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
@@ -36,52 +36,55 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private val userTodosFlow: Flow<List<Todo>> = userIdFlow.flatMapLatest { userId ->
+    private val allNotesFlow: StateFlow<List<Todo>> = userIdFlow.flatMapLatest { userId ->
+        _isLoading.value = true
         if (userId == null) {
+            _isLoading.value = false
             flowOf(emptyList())
         } else {
             firestore.collection("users").document(userId).collection("tasks")
                 .snapshots()
-                .map { snapshot -> snapshot.toObjects<Todo>() }
+                .map { snapshot ->
+                    _isLoading.value = false
+                    snapshot.toObjects<Todo>()
+                }
+                .catch {
+                    _errorLoadingTasks.value = "Failed to load notes: ${it.message}"
+                    _isLoading.value = false
+                    emit(emptyList())
+                }
         }
-    }.distinctUntilChanged()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
 
-    val todos: Flow<List<Todo>> = combine(userTodosFlow, _currentSortOrder) { allTodos, sortOrder ->
-        val unarchived = allTodos.filter { !it.isArchived }
+    val todos: Flow<List<Todo>> = combine(allNotesFlow, _currentSortOrder) { allNotes, sortOrder ->
+        val unarchived = allNotes.filter { !it.isArchived }
         sort(unarchived, sortOrder)
     }
 
-    val archivedTodos: Flow<List<Todo>> = combine(userTodosFlow, _currentSortOrder) { allTodos, sortOrder ->
-        val archived = allTodos.filter { it.isArchived }
-        sort(archived, sortOrder)
+    val archivedTodos: Flow<List<Todo>> = combine(allNotesFlow, _currentSortOrder) { allNotes, sortOrder ->
+        val archived = allNotes.filter { it.isArchived }
+        sort(archived, sortOrder, isArchiveScreen = true)
     }
 
-    private fun sort(notes: List<Todo>, sortOrder: SortOrder): List<Todo> {
-        val pinned = notes.filter { it.isPinned }
-        val unpinned = notes.filter { !it.isPinned }
+    private fun sort(notes: List<Todo>, sortOrder: SortOrder, isArchiveScreen: Boolean = false): List<Todo> {
+        val pinned = if (isArchiveScreen) emptyList() else notes.filter { it.isPinned }
+        val unpinned = if (isArchiveScreen) notes else notes.filter { !it.isPinned }
 
         val sortedUnpinned = when(sortOrder) {
             SortOrder.NEWEST_FIRST -> unpinned.sortedByDescending { it.lastEdited }
             SortOrder.OLDEST_FIRST -> unpinned.sortedBy { it.lastEdited }
-            SortOrder.ALPHABETICAL_ASC -> unpinned.sortedBy { it.title }
-            SortOrder.ALPHABETICAL_DESC -> unpinned.sortedByDescending { it.title }
+            SortOrder.ALPHABETICAL_ASC -> unpinned.sortedBy { it.title.lowercase() }
+            SortOrder.ALPHABETICAL_DESC -> unpinned.sortedByDescending { it.title.lowercase() }
             SortOrder.COMPLETED_FIRST -> unpinned.sortedByDescending { it.isCompleted }
             SortOrder.INCOMPLETE_FIRST -> unpinned.sortedBy { it.isCompleted }
-            SortOrder.CUSTOM -> unpinned // This case was missing
         }
         return pinned + sortedUnpinned
     }
 
     fun getTodoById(todoId: String): Flow<Todo?> {
-        val userId = auth.currentUser?.uid
-        if (userId == null) return flowOf(null)
-        return callbackFlow {
-            val docRef = firestore.collection("users").document(userId).collection("tasks").document(todoId)
-            val listener = docRef.addSnapshotListener { snapshot, _ ->
-                trySend(snapshot?.toObject(Todo::class.java)).isSuccess
-            }
-            awaitClose { listener.remove() }
+        return allNotesFlow.map { notes ->
+            notes.find { it.id == todoId }
         }
     }
 
@@ -94,13 +97,13 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
                 val newTodo = Todo(
                     title = title,
                     task = task,
-                    isCompleted = false,
+                    colorIndex = colorIndex,
                     isArchived = false,
-                    colorIndex = colorIndex
+                    isPinned = false
                 )
                 firestore.collection("users").document(userId).collection("tasks").add(newTodo).await()
             } catch (e: Exception) {
-                _errorLoadingTasks.value = "Failed to add task: ${e.message}"
+                _errorLoadingTasks.value = "Failed to add note: ${e.message}"
             }
         }
     }
@@ -112,12 +115,17 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     val todoRef = firestore.collection("users").document(userId).collection("tasks").document(todo.id)
                     val updates = mapOf(
-                        "title" to todo.title, "task" to todo.task, "isCompleted" to todo.isCompleted,
-                        "isPinned" to todo.isPinned, "isArchived" to todo.isArchived, "colorIndex" to todo.colorIndex,
+                        "title" to todo.title,
+                        "task" to todo.task,
+                        "isCompleted" to todo.isCompleted,
+                        "isPinned" to todo.isPinned,
+                        "isArchived" to todo.isArchived,
+                        "colorIndex" to todo.colorIndex,
+                        "reminderTime" to todo.reminderTime,
                         "lastEdited" to FieldValue.serverTimestamp()
                     )
                     todoRef.update(updates).await()
-                } catch (e: Exception) { _errorLoadingTasks.value = "Failed to update task: ${e.message}" }
+                } catch (e: Exception) { _errorLoadingTasks.value = "Failed to update note: ${e.message}" }
             }
         }
     }
@@ -126,8 +134,23 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
     fun togglePinStatus(todo: Todo) { if (todo.id != null) updateTodo(todo.copy(isPinned = !todo.isPinned)) }
     fun toggleArchiveStatus(todo: Todo) { if (todo.id != null) updateTodo(todo.copy(isArchived = !todo.isArchived, isPinned = false)) }
 
-    fun pinTodos(ids: Set<String>, pinStatus: Boolean) { runBatchUpdate(ids) { batch, docRef -> batch.update(docRef, "isPinned", pinStatus) } }
-    fun archiveTodos(ids: Set<String>, archiveStatus: Boolean) { runBatchUpdate(ids) { batch, docRef -> batch.update(docRef, "isArchived", archiveStatus, "isPinned", false) } }
+    fun pinTodos(ids: Set<String>, pinStatus: Boolean) {
+        runBatchUpdate(ids) { batch, docRef ->
+            batch.update(docRef, mapOf(
+                "isPinned" to pinStatus,
+                "lastEdited" to FieldValue.serverTimestamp()
+            ))
+        }
+    }
+    fun archiveTodos(ids: Set<String>, archiveStatus: Boolean) {
+        runBatchUpdate(ids) { batch, docRef ->
+            batch.update(docRef, mapOf(
+                "isArchived" to archiveStatus,
+                "isPinned" to false,
+                "lastEdited" to FieldValue.serverTimestamp()
+            ))
+        }
+    }
     fun deleteTodos(ids: Set<String>) { runBatchUpdate(ids) { batch, docRef -> batch.delete(docRef) } }
 
     private fun runBatchUpdate(ids: Set<String>, operation: (WriteBatch, com.google.firebase.firestore.DocumentReference) -> Unit) {

@@ -5,15 +5,15 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ListAlt
-import androidx.compose.material.icons.filled.Archive
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -23,11 +23,36 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.todo91.home.FilterOrder
 import com.example.todo91.model.Todo
 import com.example.todo91.ui.theme.AppColors
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ContextualTopAppBar(
+    selectedItemCount: Int,
+    onCloseClick: () -> Unit,
+    onPinClick: () -> Unit,
+    onArchiveClick: () -> Unit,
+    onDeleteClick: () -> Unit
+) {
+    TopAppBar(
+        title = { Text("$selectedItemCount selected") },
+        navigationIcon = {
+            IconButton(onClick = onCloseClick) { Icon(Icons.Filled.Close, contentDescription = "Close Selection") }
+        },
+        actions = {
+            IconButton(onClick = onPinClick) { Icon(Icons.Outlined.PushPin, contentDescription = "Pin Selected Notes") }
+            IconButton(onClick = onArchiveClick) { Icon(Icons.Filled.Archive, contentDescription = "Archive Selected Notes") }
+            IconButton(onClick = onDeleteClick) { Icon(Icons.Filled.Delete, contentDescription = "Delete Selected Notes") }
+        }
+    )
+}
+
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -39,6 +64,8 @@ fun TodoItem(
     onLongClick: () -> Unit
 ) {
     val cardBorder by animateDpAsState(if (isSelected) 2.dp else 0.dp, label = "border_animation")
+    val colors = if (isSystemInDarkTheme()) AppColors.DarkThemeTaskColors else AppColors.LightThemeTaskColors
+    val cardColor = colors[todo.colorIndex % colors.size]
 
     Card(
         modifier = modifier
@@ -56,7 +83,7 @@ fun TodoItem(
                 indication = null
             ),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(containerColor = AppColors.TaskBackgroundColors[todo.colorIndex % AppColors.TaskBackgroundColors.size])
+        colors = CardDefaults.cardColors(containerColor = cardColor)
     ) {
         Box(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -72,20 +99,23 @@ fun TodoItem(
                     Text(text = todo.task, style = MaterialTheme.typography.bodyMedium, maxLines = 10)
                 }
 
-                if (todo.isPinned) {
-                    Icon(
-                        imageVector = Icons.Filled.PushPin,
-                        contentDescription = "Pinned",
-                        modifier = Modifier
-                            .size(16.dp)
-                            .align(Alignment.End)
-                            .padding(top = 8.dp),
-                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                    )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (todo.isPinned) {
+                        Icon(
+                            imageVector = Icons.Filled.PushPin,
+                            contentDescription = "Pinned",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        )
+                    }
                 }
             }
-
-            // UPDATED: Replaced AnimatedVisibility with a simple 'if' to fix the compiler error.
             if (isSelected) {
                 Box(
                     modifier = Modifier
@@ -107,8 +137,6 @@ fun TodoItem(
         }
     }
 }
-
-// ... (The rest of the file remains unchanged)
 
 @Composable
 fun LoadingScreen() {
@@ -177,4 +205,9 @@ fun ConfirmationDialog(
             }
         }
     )
+}
+
+fun formatDate(date: Date): String {
+    val sdf = SimpleDateFormat("MMM dd, yyyy 'at' hh:mm a", Locale.getDefault())
+    return sdf.format(date)
 }

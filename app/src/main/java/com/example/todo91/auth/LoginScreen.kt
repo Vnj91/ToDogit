@@ -2,27 +2,28 @@ package com.example.todo91.auth
 
 import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.todo91.ui.theme.ToDo91Theme
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.common.api.ApiException
-import com.google.firebase.auth.GoogleAuthProvider
-import com.google.firebase.auth.PhoneAuthProvider
+import com.example.todo91.R
+import com.example.todo91.viewmodel.AuthViewModel
+import com.firebase.ui.auth.AuthUI
+import com.firebase.ui.auth.FirebaseAuthUIActivityResultContract
+import com.firebase.ui.auth.IdpResponse
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -34,15 +35,25 @@ fun LoginScreen(
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var phoneNumber by remember { mutableStateOf("") }
-    var verificationCode by remember { mutableStateOf("") }
-    val authError by authViewModel.authError.collectAsState()
-    val verificationId by authViewModel.verificationId.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    val activity = LocalContext.current as Activity
-    val isLoading by authViewModel.isLoading.collectAsState()
 
+    val signInLauncher = rememberLauncherForActivityResult(
+        FirebaseAuthUIActivityResultContract()
+    ) { res ->
+        if (res.resultCode == Activity.RESULT_OK) {
+            onSignInSuccess()
+        } else {
+            val response = res.idpResponse
+            if (response != null) {
+                scope.launch {
+                    snackbarHostState.showSnackbar(response.error?.message ?: "Sign-in failed")
+                }
+            }
+        }
+    }
+
+    val authError by authViewModel.authError.collectAsState()
     LaunchedEffect(authError) {
         authError?.let {
             scope.launch {
@@ -59,162 +70,85 @@ fun LoginScreen(
         }
     }
 
-    val googleSignInLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-            try {
-                val account = task.getResult(ApiException::class.java)
-                account.idToken?.let { idToken ->
-                    val credential = GoogleAuthProvider.getCredential(idToken, null)
-                    authViewModel.signInWithGoogle(credential)
-                }
-            } catch (e: ApiException) {
-                scope.launch {
-                    snackbarHostState.showSnackbar("Google Sign-In failed: ${e.statusCode}")
-                }
-            }
-        } else {
-            scope.launch {
-                snackbarHostState.showSnackbar("Google Sign-In cancelled or failed.")
-            }
-        }
-    }
-
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Login") }) },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        containerColor = MaterialTheme.colorScheme.surface
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(horizontal = 24.dp)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            OutlinedTextField(
-                value = email,
-                onValueChange = { email = it },
-                label = { Text("Email") },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isLoading
+            Image(
+                painter = painterResource(id = R.drawable.simplified),
+                contentDescription = "App Logo",
+                modifier = Modifier
+                    .width(200.dp)
+                    .padding(bottom = 24.dp)
             )
-            Spacer(Modifier.height(8.dp))
+
+            Text(
+                text = "Welcome Back!",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = "Sign in to continue",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 32.dp)
+            )
+
             OutlinedTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = { Text("Password") },
-                visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isLoading
+                value = email, onValueChange = { email = it },
+                label = { Text("Email") }, modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
             )
             Spacer(Modifier.height(16.dp))
+            OutlinedTextField(
+                value = password, onValueChange = { password = it },
+                label = { Text("Password") }, visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)
+            )
+            Spacer(Modifier.height(24.dp))
             Button(
                 onClick = { authViewModel.signInWithEmail(email, password) },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isLoading
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(12.dp)
             ) {
-                if (isLoading) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
-                } else {
-                    Text("Login with Email")
-                }
+                Text("Login", fontSize = 16.sp)
             }
-            Spacer(Modifier.height(8.dp))
-            TextButton(onClick = onNavigateToSignUp, enabled = !isLoading) {
+            TextButton(onClick = onNavigateToSignUp) {
                 Text("Don't have an account? Sign Up")
             }
-            Spacer(Modifier.height(16.dp))
-            Button(
+
+            Divider(modifier = Modifier.padding(vertical = 24.dp), thickness = 1.dp)
+
+            OutlinedButton(
                 onClick = {
-                    val signInIntent = authViewModel.getGoogleSignInClient().signInIntent
-                    googleSignInLauncher.launch(signInIntent)
+                    val providers = arrayListOf(
+                        AuthUI.IdpConfig.GoogleBuilder().build()
+                    )
+                    val signInIntent = AuthUI.getInstance()
+                        .createSignInIntentBuilder()
+                        .setAvailableProviders(providers)
+                        .build()
+                    signInLauncher.launch(signInIntent)
                 },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isLoading
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
-                if (isLoading) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
-                } else {
-                    Text("Sign In with Google")
-                }
-            }
-            Spacer(Modifier.height(24.dp))
-            Text(
-                text = "OR",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
-            Spacer(Modifier.height(16.dp))
-
-            AnimatedVisibility(
-                visible = verificationId == null,
-                enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
-                exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 })
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    OutlinedTextField(
-                        value = phoneNumber,
-                        onValueChange = { phoneNumber = it },
-                        label = { Text("Phone Number (e.g., +919876543210)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !isLoading
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Button(
-                        onClick = {
-                            if (phoneNumber.isNotBlank()) {
-                                authViewModel.startPhoneNumberVerification(activity, phoneNumber)
-                            } else {
-                                scope.launch { snackbarHostState.showSnackbar("Phone number cannot be empty") }
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !isLoading
-                    ) {
-                        if (isLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
-                        } else {
-                            Text("Send Verification Code")
-                        }
-                    }
-                }
-            }
-
-            AnimatedVisibility(
-                visible = verificationId != null,
-                enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
-                exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 })
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    OutlinedTextField(
-                        value = verificationCode,
-                        onValueChange = { verificationCode = it },
-                        label = { Text("Verification Code") },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !isLoading
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Button(
-                        onClick = {
-                            verificationId?.let { id ->
-                                val credential = PhoneAuthProvider.getCredential(id, verificationCode)
-                                authViewModel.signInWithPhoneAuthCredential(credential)
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !isLoading && verificationCode.isNotBlank()
-                    ) {
-                        if (isLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
-                        } else {
-                            Text("Sign In with Code")
-                        }
-                    }
-                }
+                Image(
+                    painter = painterResource(id = R.drawable.ic_google_logo),
+                    contentDescription = "Google Logo", modifier = Modifier.size(24.dp)
+                )
+                Text("  Sign In with Google", modifier = Modifier.padding(start = 8.dp), color = MaterialTheme.colorScheme.onSurface)
             }
         }
     }

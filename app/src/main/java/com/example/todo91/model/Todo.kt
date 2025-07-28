@@ -18,5 +18,7 @@ data class Todo(
     val timestamp: Timestamp? = null,
 
     @ServerTimestamp
-    val lastEdited: Timestamp? = null
+    val lastEdited: Timestamp? = null,
+
+    val reminderTime: Timestamp? = null
 )

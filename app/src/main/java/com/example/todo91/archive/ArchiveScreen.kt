@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.todo91.common.EmptyScreen
@@ -28,28 +29,38 @@ fun ArchiveScreen(
     val archivedTodos by todoViewModel.archivedTodos.collectAsState(initial = emptyList())
     val isLoading by todoViewModel.isLoading.collectAsState()
 
+    val configuration = LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp.dp
+    val columns = when {
+        screenWidth > 840.dp -> StaggeredGridCells.Fixed(4)
+        screenWidth > 600.dp -> StaggeredGridCells.Fixed(3)
+        else -> StaggeredGridCells.Fixed(2)
+    }
+
     Scaffold(
         topBar = {
             ArchiveTopBar(onMenuClick = { scope.launch { drawerState.open() } })
         }
     ) { paddingValues ->
-        Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .padding(paddingValues)) {
             if (isLoading && archivedTodos.isEmpty()) {
                 LoadingScreen()
             } else if (archivedTodos.isEmpty()) {
                 EmptyScreen(isArchive = true)
             } else {
                 LazyVerticalStaggeredGrid(
-                    columns = StaggeredGridCells.Fixed(2),
+                    columns = columns,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    // REMOVED: The invalid verticalArrangement parameter was here. It's now gone.
-                    verticalItemSpacing = 8.dp // ADDED: This is the correct parameter.
+                    verticalItemSpacing = 8.dp
                 ) {
                     items(archivedTodos, key = { it.id!! }) { todo ->
                         TodoItem(
-                            modifier = Modifier.animateItemPlacement(),
+                            // REMOVED: .animateItemPlacement()
+                            modifier = Modifier,
                             todo = todo,
                             isSelected = false,
                             onClick = { onNavigateToTaskDetail(todo.id) },

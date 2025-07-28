@@ -1,8 +1,10 @@
+@file:Suppress("UnstableApiUsage")
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("com.google.devtools.ksp")
     id("com.google.gms.google-services")
+    id("com.google.devtools.ksp")
 }
 
 android {
@@ -56,7 +58,7 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.2.0"))
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
-    implementation("com.google.android.gms:play-services-auth:21.3.0")
+    implementation("com.firebaseui:firebase-ui-auth:8.0.2") // The correct library for the UI
 
     // Jetpack Compose
     implementation(platform("androidx.compose:compose-bom:2024.06.00"))
@@ -75,8 +77,15 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.3")
     implementation("androidx.navigation:navigation-compose:2.7.7")
 
-    // Coroutines Play Services
+    // Splash Screen
+    implementation("androidx.core:core-splashscreen:1.0.1")
+
+    // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+
+    // Accompanist (for permissions)
+    implementation("com.google.accompanist:accompanist-permissions:0.34.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

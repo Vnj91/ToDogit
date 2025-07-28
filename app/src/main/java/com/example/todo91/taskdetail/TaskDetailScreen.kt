@@ -1,9 +1,13 @@
 package com.example.todo91.taskdetail
 
+import android.Manifest
 import android.content.Intent
+import android.os.Build
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -14,6 +18,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -21,17 +26,25 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.todo91.common.formatDate
 import com.example.todo91.model.Todo
+import com.example.todo91.reminders.AlarmSchedulerImpl
 import com.example.todo91.ui.theme.AppColors
-import com.example.todo91.ui.theme.ToDo91Theme
 import com.example.todo91.viewmodel.TodoViewModel
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
+import com.google.accompanist.permissions.rememberPermissionState
+import com.google.firebase.Timestamp
 import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
 fun TaskDetailScreen(
     todoId: String?,
@@ -44,35 +57,91 @@ fun TaskDetailScreen(
         remember { mutableStateOf<Todo?>(null) }
     }
 
+    val colors = if (isSystemInDarkTheme()) AppColors.DarkThemeTaskColors else AppColors.LightThemeTaskColors
+
+    var title by remember(todo?.id) { mutableStateOf(todo?.title ?: "") }
+    var taskText by remember(todo?.id) { mutableStateOf(todo?.task ?: "") }
+    var selectedColorIndex by remember(todo?.id) { mutableStateOf(todo?.colorIndex ?: colors.indices.random()) }
+    val lastEditedString = todo?.lastEdited?.toDate()?.let { formatDate(it) } ?: "Just now"
+
+    val animatedBackgroundColor by animateColorAsState(
+        targetValue = colors.getOrElse(selectedColorIndex) { colors.first() },
+        label = "background_color_animation"
+    )
+
+    val isDarkBackground = animatedBackgroundColor.red * 0.299 + animatedBackgroundColor.green * 0.587 + animatedBackgroundColor.blue * 0.114 < 0.5
+
     val context = LocalContext.current
+    val alarmScheduler = remember { AlarmSchedulerImpl(context) }
 
-    var title by remember { mutableStateOf("") }
-    var taskText by remember { mutableStateOf("") }
-    var selectedColorIndex by remember { mutableStateOf(0) }
-    var lastEditedString by remember { mutableStateOf(" ") }
-    var isInitialized by remember { mutableStateOf(false) }
+    var showDatePicker by rememberSaveable { mutableStateOf(false) }
+    var showTimePicker by rememberSaveable { mutableStateOf(false) }
+    val datePickerState = rememberDatePickerState()
+    val timePickerState = rememberTimePickerState()
 
-    LaunchedEffect(todo, todoId) {
-        if (todoId != null) { // Edit mode
-            if (todo != null) {
-                title = todo!!.title
-                taskText = todo!!.task
-                selectedColorIndex = todo!!.colorIndex
-                lastEditedString = todo!!.lastEdited?.toDate()?.let { formatDate(it) } ?: "Just now"
-                isInitialized = true
-            }
-        } else { // Add mode
-            if (!isInitialized) {
-                selectedColorIndex = AppColors.TaskBackgroundColors.indices.random()
-                lastEditedString = "Creating new note..."
-                isInitialized = true
-            }
+    val notificationPermissionState = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        rememberPermissionState(permission = Manifest.permission.POST_NOTIFICATIONS)
+    } else {
+        null
+    }
+
+    if (showTimePicker) {
+        AlertDialog(
+            onDismissRequest = { showTimePicker = false },
+            title = { Text("Select Time") },
+            text = { TimePicker(state = timePickerState, modifier = Modifier.fillMaxWidth()) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val selectedDate = datePickerState.selectedDateMillis?.let {
+                            Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate()
+                        } ?: LocalDate.now()
+                        val selectedTime = LocalTime.of(timePickerState.hour, timePickerState.minute)
+                        val localDateTime = selectedDate.atTime(selectedTime)
+                        val instant = localDateTime.atZone(ZoneId.systemDefault()).toInstant()
+                        val newReminderTime = Timestamp(Date.from(instant))
+
+                        todo?.let {
+                            val updatedTodo = it.copy(reminderTime = newReminderTime)
+                            todoViewModel.updateTodo(updatedTodo)
+                            alarmScheduler.schedule(updatedTodo)
+                        }
+                        showTimePicker = false
+                    }
+                ) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { showTimePicker = false }) { Text("Cancel") } }
+        )
+    }
+
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDatePicker = false
+                        showTimePicker = true
+                    }
+                ) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("Cancel") } }
+        ) {
+            DatePicker(state = datePickerState)
         }
     }
 
     Scaffold(
+        containerColor = animatedBackgroundColor,
         topBar = {
             TopAppBar(
+                modifier = Modifier.statusBarsPadding(),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    navigationIconContentColor = if (isDarkBackground) Color.White else Color.Black,
+                    titleContentColor = if (isDarkBackground) Color.White else Color.Black,
+                    actionIconContentColor = if (isDarkBackground) Color.White else Color.Black
+                ),
                 title = { Text(if (todoId == null) "Add New Note" else "Edit Note") },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
@@ -80,30 +149,31 @@ fun TaskDetailScreen(
                     }
                 },
                 actions = {
-                    if (todo != null) {
+                    val currentTodo = todo
+                    if (currentTodo != null) {
                         IconButton(onClick = {
-                            val sharedText = if (title.isNotBlank()) "$title\n\n$taskText" else taskText
-                            val sendIntent = Intent().apply {
-                                action = Intent.ACTION_SEND
-                                putExtra(Intent.EXTRA_TEXT, sharedText)
-                                type = "text/plain"
+                            if (notificationPermissionState == null || notificationPermissionState.status.isGranted) {
+                                showDatePicker = true
+                            } else {
+                                notificationPermissionState.launchPermissionRequest()
                             }
-                            val shareIntent = Intent.createChooser(sendIntent, null)
-                            context.startActivity(shareIntent)
                         }) {
-                            Icon(Icons.Filled.Share, contentDescription = "Share Note")
+                            Icon(
+                                imageVector = if (currentTodo.reminderTime != null) Icons.Filled.NotificationsActive else Icons.Filled.Notifications,
+                                contentDescription = "Add Reminder"
+                            )
                         }
-
                         IconButton(onClick = {
-                            todoViewModel.toggleArchiveStatus(todo!!)
+                            todoViewModel.toggleArchiveStatus(currentTodo)
                             onBackClick()
                         }) {
                             Icon(Icons.Filled.Archive, contentDescription = "Archive Note")
                         }
-
-                        IconButton(onClick = { todoViewModel.togglePinStatus(todo!!) }) {
+                        IconButton(onClick = {
+                            todoViewModel.togglePinStatus(currentTodo)
+                        }) {
                             Icon(
-                                imageVector = if (todo?.isPinned == true) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                                imageVector = if (currentTodo.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
                                 contentDescription = "Pin Note"
                             )
                         }
@@ -111,15 +181,15 @@ fun TaskDetailScreen(
 
                     IconButton(onClick = {
                         if (taskText.isNotBlank() || title.isNotBlank()) {
-                            if (todo != null) { // Update existing task
+                            if (currentTodo != null) {
                                 todoViewModel.updateTodo(
-                                    todo!!.copy(
+                                    currentTodo.copy(
                                         title = title,
                                         task = taskText,
                                         colorIndex = selectedColorIndex
                                     )
                                 )
-                            } else { // Add new task
+                            } else {
                                 todoViewModel.addTodo(title, taskText, selectedColorIndex)
                             }
                             onBackClick()
@@ -144,7 +214,16 @@ fun TaskDetailScreen(
                     onValueChange = { title = it },
                     label = { Text("Title") },
                     modifier = Modifier.fillMaxWidth(),
-                    textStyle = MaterialTheme.typography.titleLarge
+                    textStyle = MaterialTheme.typography.titleLarge,
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedIndicatorColor = if (isDarkBackground) Color.White else MaterialTheme.colorScheme.primary,
+                        unfocusedIndicatorColor = if (isDarkBackground) Color.White.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        cursorColor = if (isDarkBackground) Color.White else MaterialTheme.colorScheme.primary,
+                        focusedLabelColor = if (isDarkBackground) Color.White else MaterialTheme.colorScheme.primary,
+                        unfocusedLabelColor = if (isDarkBackground) Color.White.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
@@ -153,20 +232,30 @@ fun TaskDetailScreen(
                     label = { Text("Note content...") },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f)
+                        .weight(1f),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedIndicatorColor = if (isDarkBackground) Color.White else MaterialTheme.colorScheme.primary,
+                        unfocusedIndicatorColor = if (isDarkBackground) Color.White.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        cursorColor = if (isDarkBackground) Color.White else MaterialTheme.colorScheme.primary,
+                        focusedLabelColor = if (isDarkBackground) Color.White else MaterialTheme.colorScheme.primary,
+                        unfocusedLabelColor = if (isDarkBackground) Color.White.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
                 )
                 Spacer(Modifier.height(16.dp))
 
                 Text(
                     text = "Select Color:",
                     style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    modifier = Modifier.padding(bottom = 8.dp),
+                    color = if (isDarkBackground) Color.White.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurface
                 )
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    itemsIndexed(AppColors.TaskBackgroundColors) { index, color ->
+                    itemsIndexed(colors) { index, color ->
                         Box(
                             modifier = Modifier
                                 .size(48.dp)
@@ -174,7 +263,9 @@ fun TaskDetailScreen(
                                 .background(color)
                                 .border(
                                     width = 2.dp,
-                                    color = if (index == selectedColorIndex) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                    color = if (index == selectedColorIndex) {
+                                        if (isDarkBackground) Color.White else MaterialTheme.colorScheme.primary
+                                    } else Color.Transparent,
                                     shape = CircleShape
                                 )
                                 .clickable { selectedColorIndex = index },
@@ -184,7 +275,7 @@ fun TaskDetailScreen(
                                 Icon(
                                     imageVector = Icons.Filled.Done,
                                     contentDescription = "Selected",
-                                    tint = MaterialTheme.colorScheme.primary
+                                    tint = if (isDarkBackground) Color.White else MaterialTheme.colorScheme.primary
                                 )
                             }
                         }
@@ -199,21 +290,8 @@ fun TaskDetailScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                color = if (isDarkBackground) Color.White.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
         }
-    }
-}
-
-private fun formatDate(date: Date): String {
-    val sdf = SimpleDateFormat("MMM dd, yyyy 'at' hh:mm a", Locale.getDefault())
-    return sdf.format(date)
-}
-
-@Preview(showBackground = true)
-@Composable
-fun PreviewTaskDetailScreen() {
-    ToDo91Theme {
-        TaskDetailScreen(todoId = null, onBackClick = {})
     }
 }
