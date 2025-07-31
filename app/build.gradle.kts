@@ -58,7 +58,7 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.2.0"))
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
-    implementation("com.firebaseui:firebase-ui-auth:8.0.2") // The correct library for the UI
+    implementation("com.firebaseui:firebase-ui-auth:8.0.2") // The correct, stable library for UI
 
     // Jetpack Compose
     implementation(platform("androidx.compose:compose-bom:2024.06.00"))
@@ -95,4 +95,6 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
 }

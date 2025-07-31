@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.example.todo91.home.FilterOrder
 import com.example.todo91.model.Todo
@@ -61,11 +62,13 @@ fun TodoItem(
     todo: Todo,
     isSelected: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit
+    onLongClick: () -> Unit,
+    onToggleComplete: (Todo) -> Unit
 ) {
     val cardBorder by animateDpAsState(if (isSelected) 2.dp else 0.dp, label = "border_animation")
     val colors = if (isSystemInDarkTheme()) AppColors.DarkThemeTaskColors else AppColors.LightThemeTaskColors
     val cardColor = colors[todo.colorIndex % colors.size]
+    val contentColor = if (isColorDark(cardColor)) Color.White else Color.Black
 
     Card(
         modifier = modifier
@@ -91,12 +94,43 @@ fun TodoItem(
                     .fillMaxWidth()
                     .padding(16.dp),
             ) {
-                if (todo.title.isNotEmpty()) {
-                    Text(text = todo.title, style = MaterialTheme.typography.titleMedium, maxLines = 2)
-                    Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = todo.isCompleted,
+                        onCheckedChange = { onToggleComplete(todo) },
+                        modifier = Modifier.size(24.dp),
+                        colors = CheckboxDefaults.colors(
+                            checkmarkColor = cardColor,
+                            checkedColor = contentColor,
+                            uncheckedColor = contentColor
+                        )
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    if (todo.title.isNotEmpty()) {
+                        Text(
+                            text = todo.title,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                textDecoration = if (todo.isCompleted) TextDecoration.LineThrough else null
+                            ),
+                            maxLines = 1,
+                            color = contentColor
+                        )
+                    }
                 }
+
                 if (todo.task.isNotEmpty()) {
-                    Text(text = todo.task, style = MaterialTheme.typography.bodyMedium, maxLines = 10)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = todo.task,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            textDecoration = if (todo.isCompleted) TextDecoration.LineThrough else null
+                        ),
+                        maxLines = 8,
+                        color = contentColor.copy(alpha = 0.8f)
+                    )
                 }
 
                 Row(
@@ -111,7 +145,7 @@ fun TodoItem(
                             imageVector = Icons.Filled.PushPin,
                             contentDescription = "Pinned",
                             modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            tint = contentColor.copy(alpha = 0.7f)
                         )
                     }
                 }
@@ -136,6 +170,11 @@ fun TodoItem(
             }
         }
     }
+}
+
+fun isColorDark(color: Color): Boolean {
+    val darkness = 1 - (0.299 * color.red + 0.587 * color.green + 0.114 * color.blue)
+    return darkness >= 0.5
 }
 
 @Composable

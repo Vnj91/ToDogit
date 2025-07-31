@@ -5,6 +5,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -32,6 +33,7 @@ fun HomeScreen(
     val currentSortOrder by todoViewModel.currentSortOrder.collectAsState()
     val isLoading by todoViewModel.isLoading.collectAsState()
     val errorLoadingTasks by todoViewModel.errorLoadingTasks.collectAsState()
+    val localScope = rememberCoroutineScope() // Create a local scope
 
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
     val isInSelectionMode = selectedIds.isNotEmpty()
@@ -47,6 +49,8 @@ fun HomeScreen(
     val filteredTodos = remember(todos, searchQuery, currentFilterOrder) {
         filterNotes(todos, searchQuery, currentFilterOrder)
     }
+
+    val (pinnedNotes, otherNotes) = filteredTodos.partition { it.isPinned }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -109,27 +113,84 @@ fun HomeScreen(
             when {
                 isLoading -> LoadingScreen()
                 errorLoadingTasks != null -> ErrorScreen(message = errorLoadingTasks!!)
-                filteredTodos.isEmpty() -> EmptyScreen(searchQuery = searchQuery, currentFilterOrder = currentFilterOrder)
-                else -> NoteGrid(
-                    todos = filteredTodos,
-                    selectedIds = selectedIds,
-                    onNoteClick = { todo ->
-                        if (isInSelectionMode) {
-                            if (todo.id in selectedIds) {
-                                selectedIds -= todo.id!!
-                            } else {
-                                selectedIds += todo.id!!
+                todos.isEmpty() && searchQuery.isBlank() -> EmptyScreen()
+                else -> {
+                    val configuration = LocalConfiguration.current
+                    val screenWidth = configuration.screenWidthDp.dp
+                    val columns = when {
+                        screenWidth > 840.dp -> 4
+                        screenWidth > 600.dp -> 3
+                        else -> 2
+                    }
+
+                    LazyVerticalStaggeredGrid(
+                        columns = StaggeredGridCells.Fixed(columns),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalItemSpacing = 8.dp
+                    ) {
+                        if (pinnedNotes.isNotEmpty()) {
+                            item(span = StaggeredGridItemSpan.FullLine) {
+                                Text(
+                                    text = "PINNED",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.padding(bottom = 8.dp, top = 4.dp)
+                                )
                             }
-                        } else {
-                            onNavigateToTaskDetail(todo.id)
+                            items(pinnedNotes, key = { "pinned-${it.id}" }) { todo ->
+                                TodoItem(
+                                    modifier = Modifier
+                                        .height(200.dp)
+                                        .animateItemPlacement(),
+                                    todo = todo,
+                                    isSelected = todo.id in selectedIds,
+                                    onClick = { handleNoteClick(todo, isInSelectionMode, selectedIds, { selectedIds += it }, { selectedIds -= it }, onNavigateToTaskDetail) },
+                                    onLongClick = { if (!isInSelectionMode) selectedIds += todo.id!! },
+                                    onToggleComplete = {
+                                        localScope.launch {
+                                            todoViewModel.toggleTodoCompletion(it)
+                                        }
+                                    }
+                                )
+                            }
                         }
-                    },
-                    onNoteLongClick = { todo ->
-                        if (!isInSelectionMode) {
-                            selectedIds += todo.id!!
+
+                        if (pinnedNotes.isNotEmpty() && otherNotes.isNotEmpty()) {
+                            item(span = StaggeredGridItemSpan.FullLine) {
+                                Column {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    HorizontalDivider()
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = "OTHERS",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        modifier = Modifier.padding(bottom = 8.dp, top = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        if (otherNotes.isNotEmpty()) {
+                            items(otherNotes, key = { "other-${it.id}" }) { todo ->
+                                TodoItem(
+                                    modifier = Modifier
+                                        .height(200.dp)
+                                        .animateItemPlacement(),
+                                    todo = todo,
+                                    isSelected = todo.id in selectedIds,
+                                    onClick = { handleNoteClick(todo, isInSelectionMode, selectedIds, { selectedIds += it }, { selectedIds -= it }, onNavigateToTaskDetail) },
+                                    onLongClick = { if (!isInSelectionMode) selectedIds += todo.id!! },
+                                    onToggleComplete = {
+                                        localScope.launch {
+                                            todoViewModel.toggleTodoCompletion(it)
+                                        }
+                                    }
+                                )
+                            }
                         }
                     }
-                )
+                }
             }
         }
     }
@@ -148,6 +209,25 @@ fun HomeScreen(
     }
 }
 
+private fun handleNoteClick(
+    todo: Todo,
+    isInSelectionMode: Boolean,
+    selectedIds: Set<String>,
+    onSelect: (String) -> Unit,
+    onDeselect: (String) -> Unit,
+    onNavigate: (String?) -> Unit
+) {
+    if (isInSelectionMode) {
+        if (todo.id in selectedIds) {
+            onDeselect(todo.id!!)
+        } else {
+            onSelect(todo.id!!)
+        }
+    } else {
+        onNavigate(todo.id)
+    }
+}
+
 private fun filterNotes(notes: List<Todo>, searchQuery: String, filterOrder: FilterOrder): List<Todo> {
     val searchFiltered = if (searchQuery.isBlank()) {
         notes
@@ -158,40 +238,5 @@ private fun filterNotes(notes: List<Todo>, searchQuery: String, filterOrder: Fil
         FilterOrder.COMPLETED -> searchFiltered.filter { it.isCompleted }
         FilterOrder.INCOMPLETE -> searchFiltered.filter { !it.isCompleted }
         FilterOrder.ALL -> searchFiltered
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun NoteGrid(
-    todos: List<Todo>,
-    selectedIds: Set<String>,
-    onNoteClick: (Todo) -> Unit,
-    onNoteLongClick: (Todo) -> Unit
-) {
-    val configuration = LocalConfiguration.current
-    val screenWidth = configuration.screenWidthDp.dp
-    val columnCount = when {
-        screenWidth > 840.dp -> 4
-        screenWidth > 600.dp -> 3
-        else -> 2
-    }
-
-    LazyVerticalStaggeredGrid(
-        columns = StaggeredGridCells.Fixed(columnCount),
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalItemSpacing = 8.dp
-    ) {
-        items(todos, key = { it.id!! }) { todo ->
-            TodoItem(
-                modifier = Modifier.animateItemPlacement(),
-                todo = todo,
-                isSelected = todo.id in selectedIds,
-                onClick = { onNoteClick(todo) },
-                onLongClick = { onNoteLongClick(todo) }
-            )
-        }
     }
 }

@@ -28,6 +28,7 @@ fun ArchiveScreen(
     val todoViewModel: TodoViewModel = viewModel()
     val archivedTodos by todoViewModel.archivedTodos.collectAsState(initial = emptyList())
     val isLoading by todoViewModel.isLoading.collectAsState()
+    val localScope = rememberCoroutineScope() // Create a local scope for suspend function calls
 
     val configuration = LocalConfiguration.current
     val screenWidth = configuration.screenWidthDp.dp
@@ -45,7 +46,7 @@ fun ArchiveScreen(
         Box(modifier = Modifier
             .fillMaxSize()
             .padding(paddingValues)) {
-            if (isLoading && archivedTodos.isEmpty()) {
+            if (isLoading) {
                 LoadingScreen()
             } else if (archivedTodos.isEmpty()) {
                 EmptyScreen(isArchive = true)
@@ -59,12 +60,18 @@ fun ArchiveScreen(
                 ) {
                     items(archivedTodos, key = { it.id!! }) { todo ->
                         TodoItem(
-                            // REMOVED: .animateItemPlacement()
-                            modifier = Modifier,
+                            modifier = Modifier
+                                .height(200.dp)
+                                .animateItemPlacement(),
                             todo = todo,
                             isSelected = false,
                             onClick = { onNavigateToTaskDetail(todo.id) },
-                            onLongClick = {}
+                            onLongClick = {},
+                            onToggleComplete = {
+                                localScope.launch { // Call suspend function from a coroutine
+                                    todoViewModel.toggleTodoCompletion(it)
+                                }
+                            }
                         )
                     }
                 }

@@ -3,6 +3,7 @@ package com.example.todo91.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.todo91.model.ChecklistItem
 import com.example.todo91.model.SortOrder
 import com.example.todo91.model.Todo
 import com.google.firebase.auth.FirebaseAuth
@@ -12,6 +13,7 @@ import com.google.firebase.firestore.WriteBatch
 import com.google.firebase.firestore.ktx.snapshots
 import com.google.firebase.firestore.ktx.toObjects
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -29,6 +31,10 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
     val errorLoadingTasks: StateFlow<String?> = _errorLoadingTasks.asStateFlow()
 
     private val userIdFlow = MutableStateFlow(auth.currentUser?.uid)
+
+    // Channel for one-time navigation events
+    private val _navigateToTodo = Channel<String>()
+    val navigateToTodo = _navigateToTodo.receiveAsFlow()
 
     init {
         auth.addAuthStateListener { firebaseAuth ->
@@ -83,6 +89,7 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun getTodoById(todoId: String): Flow<Todo?> {
+        // This must look at ALL notes, so it can find archived ones too.
         return allNotesFlow.map { notes ->
             notes.find { it.id == todoId }
         }
@@ -90,54 +97,67 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setSortOrder(order: SortOrder) { _currentSortOrder.value = order }
 
-    fun addTodo(title: String, task: String, colorIndex: Int) {
+    suspend fun addTodo(title: String, task: String, colorIndex: Int, checklistItems: List<ChecklistItem>?) {
         val userId = auth.currentUser?.uid ?: return
-        viewModelScope.launch {
-            try {
-                val newTodo = Todo(
-                    title = title,
-                    task = task,
-                    colorIndex = colorIndex,
-                    isArchived = false,
-                    isPinned = false
-                )
-                firestore.collection("users").document(userId).collection("tasks").add(newTodo).await()
-            } catch (e: Exception) {
-                _errorLoadingTasks.value = "Failed to add note: ${e.message}"
-            }
+        try {
+            val newTodo = Todo(
+                title = title,
+                task = task,
+                colorIndex = colorIndex,
+                isArchived = false,
+                isPinned = false,
+                checklistItems = checklistItems
+            )
+            firestore.collection("users").document(userId).collection("tasks").add(newTodo).await()
+        } catch (e: Exception) {
+            _errorLoadingTasks.value = "Failed to add note: ${e.message}"
         }
     }
 
-    fun updateTodo(todo: Todo) {
+    suspend fun updateTodo(todo: Todo) {
         val userId = auth.currentUser?.uid
         if (userId != null && todo.id != null) {
-            viewModelScope.launch {
-                try {
-                    val todoRef = firestore.collection("users").document(userId).collection("tasks").document(todo.id)
-                    val updates = mapOf(
-                        "title" to todo.title,
-                        "task" to todo.task,
-                        "isCompleted" to todo.isCompleted,
-                        "isPinned" to todo.isPinned,
-                        "isArchived" to todo.isArchived,
-                        "colorIndex" to todo.colorIndex,
-                        "reminderTime" to todo.reminderTime,
-                        "lastEdited" to FieldValue.serverTimestamp()
-                    )
-                    todoRef.update(updates).await()
-                } catch (e: Exception) { _errorLoadingTasks.value = "Failed to update note: ${e.message}" }
-            }
+            try {
+                val todoRef = firestore.collection("users").document(userId).collection("tasks").document(todo.id)
+                val checklistItemsMap = todo.checklistItems?.map { mapOf("text" to it.text, "checked" to it.isChecked) }
+
+                val updates = mutableMapOf<String, Any?>(
+                    "title" to todo.title,
+                    "task" to todo.task,
+                    "isCompleted" to todo.isCompleted,
+                    "isPinned" to todo.isPinned,
+                    "isArchived" to todo.isArchived,
+                    "colorIndex" to todo.colorIndex,
+                    "reminderTime" to todo.reminderTime,
+                    "lastEdited" to FieldValue.serverTimestamp(),
+                    "checklistItems" to checklistItemsMap
+                )
+                todoRef.update(updates).await()
+            } catch (e: Exception) { _errorLoadingTasks.value = "Failed to update note: ${e.message}" }
         }
     }
 
-    fun toggleTodoCompletion(todo: Todo) { if (todo.id != null) updateTodo(todo.copy(isCompleted = !todo.isCompleted)) }
-    fun togglePinStatus(todo: Todo) { if (todo.id != null) updateTodo(todo.copy(isPinned = !todo.isPinned)) }
-    fun toggleArchiveStatus(todo: Todo) { if (todo.id != null) updateTodo(todo.copy(isArchived = !todo.isArchived, isPinned = false)) }
+    suspend fun toggleTodoCompletion(todo: Todo) { if (todo.id != null) updateTodo(todo.copy(isCompleted = !todo.isCompleted)) }
+
+    suspend fun togglePinStatus(todo: Todo) {
+        if (todo.id != null) {
+            // A pinned note must not be archived.
+            updateTodo(todo.copy(isPinned = !todo.isPinned, isArchived = false))
+        }
+    }
+
+    suspend fun toggleArchiveStatus(todo: Todo) {
+        if (todo.id != null) {
+            // An archived note must not be pinned.
+            updateTodo(todo.copy(isArchived = !todo.isArchived, isPinned = false))
+        }
+    }
 
     fun pinTodos(ids: Set<String>, pinStatus: Boolean) {
         runBatchUpdate(ids) { batch, docRef ->
             batch.update(docRef, mapOf(
                 "isPinned" to pinStatus,
+                "isArchived" to false, // Pinned notes must be unarchived
                 "lastEdited" to FieldValue.serverTimestamp()
             ))
         }
@@ -146,7 +166,7 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
         runBatchUpdate(ids) { batch, docRef ->
             batch.update(docRef, mapOf(
                 "isArchived" to archiveStatus,
-                "isPinned" to false,
+                "isPinned" to false, // Archived notes must be unpinned
                 "lastEdited" to FieldValue.serverTimestamp()
             ))
         }
@@ -162,6 +182,12 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
                 ids.forEach { id -> operation(batch, collection.document(id)) }
                 batch.commit().await()
             } catch (e: Exception) { _errorLoadingTasks.value = "Batch operation failed: ${e.message}" }
+        }
+    }
+
+    fun requestNavigationToTodo(todoId: String) {
+        viewModelScope.launch {
+            _navigateToTodo.send(todoId)
         }
     }
 }

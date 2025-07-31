@@ -1,20 +1,31 @@
 package com.example.todo91.viewmodel
 
-import androidx.lifecycle.ViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
-// Enum to represent the available theme options
+// Enum remains the same
 enum class ThemeSetting {
     System, Light, Dark
 }
 
-class ThemeViewModel : ViewModel() {
-    private val _themeSetting = MutableStateFlow(ThemeSetting.System)
-    val themeSetting: StateFlow<ThemeSetting> = _themeSetting.asStateFlow()
+class ThemeViewModel(application: Application) : AndroidViewModel(application) {
+    private val themeRepository = ThemeRepository(application)
+
+    val themeSetting: StateFlow<ThemeSetting> = themeRepository.themeSettingFlow
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = ThemeSetting.System
+        )
 
     fun updateThemeSetting(setting: ThemeSetting) {
-        _themeSetting.value = setting
+        viewModelScope.launch {
+            themeRepository.saveThemeSetting(setting)
+        }
     }
 }
